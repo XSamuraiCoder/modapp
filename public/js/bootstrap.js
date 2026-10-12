@@ -371,4 +371,9 @@ function loadScript(src, modId) {
   // site.js listens for this to build the nav/widget-bar from whatever
   // got registered.
   document.dispatchEvent(new CustomEvent('mods:ready', { detail: mods }));
+
+  // Developer auto-refresh (Settings, Developer): main sends the ids of mods whose files changed on disk.
+  window.electronAPI?.onModFilesChanged?.(({ ids }) => {
+    refreshMods({ reload: ids }).catch((error) => console.error('[mods] auto-refresh failed:', error));
+  });
 })();

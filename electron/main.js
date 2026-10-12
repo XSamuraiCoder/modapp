@@ -232,8 +232,55 @@ ipcMain.handle('settings:write', (event, { modId, changes }) => {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('settings changes must be an object');
   const settings = { ...defaultSettings, ...readJson(settingsPath, {}), ...changes };
   writeJson(settingsPath, settings);
+  applyDeveloperSettings(settings);
   return settings;
 });
+
+// ---- Developer: auto-refresh mods ----
+// With "devAutoRefreshMods" on (Settings, Developer), the mods folder is watched. When files inside a mod
+// change, the renderer is told which mods and reloads just those (see ModAPI.refreshMods), so you can edit
+// a mod and see the result without restarting. Config files and half-installed folders start with a dot and
+// never match a mod id, so the app's own bookkeeping doesn't trigger it.
+let modWatcher = null;
+let modWatchTimer = null;
+const changedMods = new Set();
+
+function stopModWatcher() {
+  if (modWatcher) { try { modWatcher.close(); } catch { /* already closed */ } }
+  modWatcher = null;
+  clearTimeout(modWatchTimer);
+  changedMods.clear();
+}
+
+function flushModChanges() {
+  const ids = [...changedMods];
+  changedMods.clear();
+  if (ids.length && mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('mods:files-changed', { ids });
+}
+
+function startModWatcher() {
+  if (modWatcher) return;
+  try {
+    modWatcher = fs.watch(modsDir, { recursive: true }, (_event, filename) => {
+      const parts = String(filename || '').split(/[\\/]/);
+      if (!MOD_ID_PATTERN.test(parts[0]) || parts.some((part) => part === 'node_modules' || part === '.git')) return;
+      changedMods.add(parts[0]);
+      clearTimeout(modWatchTimer);
+      modWatchTimer = setTimeout(flushModChanges, 400); // an editor save or an install writes several files
+    });
+    modWatcher.on('error', (error) => { console.warn('[mods] file watcher stopped:', error.message); stopModWatcher(); });
+  } catch (error) {
+    console.warn('[mods] could not watch the mods folder:', error.message);
+    modWatcher = null;
+  }
+}
+
+function applyDeveloperSettings(settings) {
+  if (settings && settings.devAutoRefreshMods === true) startModWatcher();
+  else stopModWatcher();
+}
+
+app.on('before-quit', stopModWatcher);
 
 ipcMain.handle('mods:list', () => discoverMods());
 ipcMain.handle('mods:toggle', (event, { modId, id }) => {
@@ -712,6 +759,7 @@ app.whenReady().then(async () => {
     ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }])
     : null);
   createWindow();
+  applyDeveloperSettings({ ...defaultSettings, ...readJson(settingsPath, {}) });
 });
 
 app.on('window-all-closed', () => {

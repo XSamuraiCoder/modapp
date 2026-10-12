@@ -120,6 +120,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', { url }),
 
+  // Developer auto-refresh: main reports which mods had files change (only sent while the setting is on).
+  onModFilesChanged: (callback) => {
+    const listener = (_event, payload) => callback({ ids: Array.isArray(payload?.ids) ? payload.ids.filter((id) => typeof id === 'string') : [] });
+    ipcRenderer.on('mods:files-changed', listener);
+    return () => ipcRenderer.removeListener('mods:files-changed', listener);
+  },
+
   // Everything permissioned: electronAPI.forMod('music-player').fs.readFile(...)
   forMod: (modId) => {
     if (typeof modId !== 'string' || !MOD_ID_PATTERN.test(modId)) throw new Error('invalid mod id');
