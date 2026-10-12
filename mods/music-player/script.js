@@ -915,6 +915,61 @@ function renderMusicPlayer(container) {
   let streamingHandle = null;
   let playbackRetrying = false;
 
+  // ---------------- play queue ----------------
+  // The queue is the single source of truth for play order. With shuffle off it is the library order; with
+  // shuffle on it is a shuffled copy. Next, previous and "the track ended" only ever move through it, and
+  // clicking a track jumps to that track's place in it.
+  let queue = [];     // file objects, in play order
+  let queuePos = -1;  // where the current track is in `queue`
+
+  function shuffled(list) {
+    const copy = list.slice();
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+
+  // Rebuilds the queue around what is playing now. Shuffle on: the current track becomes the first entry and
+  // the rest follow in random order. Shuffle off: the library order resumes from the current track.
+  function buildQueue() {
+    const current = mediaFiles[currentIndex] || null;
+    if (shuffleMode) {
+      const rest = shuffled(mediaFiles.filter((file) => file !== current));
+      queue = current ? [current, ...rest] : rest;
+      queuePos = current ? 0 : -1;
+    } else {
+      queue = mediaFiles.slice();
+      queuePos = current ? queue.indexOf(current) : -1;
+    }
+  }
+
+  // New library entries join the end of the queue (shuffled among themselves when shuffle is on).
+  function appendNewToQueue() {
+    const known = new Set(queue);
+    const fresh = mediaFiles.filter((file) => !known.has(file));
+    queue.push(...(shuffleMode ? shuffled(fresh) : fresh));
+  }
+
+  // Called when the queue has been played through and starts over: a new shuffle round, so every lap has a
+  // different order, and the track that just finished is not the first one again.
+  function reshuffleForNextRound() {
+    if (!shuffleMode || queue.length < 2) return;
+    const last = queue[queue.length - 1];
+    const next = shuffled(queue);
+    if (next[0] === last) {
+      const swap = 1 + Math.floor(Math.random() * (next.length - 1));
+      [next[0], next[swap]] = [next[swap], next[0]];
+    }
+    queue = next;
+  }
+
+  function playQueueAt(position) {
+    const file = queue[position];
+    if (file) safePlayMedia(mediaFiles.indexOf(file));
+  }
+
   async function ensureMediaUrl(file) {
     if (file.url) return file.url;
     if (!file.storagePath) throw new Error(`Media file is unavailable: ${file.name}`);
@@ -1028,8 +1083,9 @@ function renderMusicPlayer(container) {
         uploadArea.style.pointerEvents = 'auto';
       }
 
+      appendNewToQueue();
       updatePlaylist();
-      if (mediaFiles.length > 0 && currentIndex === -1) safePlayMedia(0);
+      if (mediaFiles.length > 0 && currentIndex === -1) playQueueAt(0);
     } catch (error) {
       console.error('Upload error:', error);
       uploadArea.innerHTML = `
@@ -1102,6 +1158,8 @@ function renderMusicPlayer(container) {
     currentIndex = index;
     const file = mediaFiles[index];
     isPlaying = true;
+    queuePos = queue.indexOf(file);
+    if (queuePos === -1) buildQueue(); // not in the queue (should not happen): rebuild around this track
 
     try {
       await ensureMediaUrl(file);
@@ -1286,14 +1344,13 @@ function renderMusicPlayer(container) {
       }
       return;
     }
-    if (shuffleMode) {
-      safePlayMedia(Math.floor(Math.random() * mediaFiles.length));
-    } else if (repeatMode === 'all' && currentIndex === mediaFiles.length - 1) {
-      safePlayMedia(0);
-    } else if (currentIndex < mediaFiles.length - 1) {
-      safePlayMedia(currentIndex + 1);
+    if (queuePos + 1 < queue.length) {
+      playQueueAt(queuePos + 1);
+    } else if (repeatMode === 'all') {
+      reshuffleForNextRound();
+      playQueueAt(0);
     } else {
-      isPlaying = false;
+      isPlaying = false; // end of the queue
       updatePlayPauseButton();
     }
   }
@@ -1312,7 +1369,7 @@ function renderMusicPlayer(container) {
   }
 
   function togglePlayPause() {
-    if (!currentMediaElement) { if (mediaFiles.length > 0) safePlayMedia(0); return; }
+    if (!currentMediaElement) { if (queue.length > 0) playQueueAt(0); return; }
     if (currentMediaElement.paused) {
       currentMediaElement.play().catch((error) => {
         console.error('[music-player] playback failed:', error);
@@ -1323,8 +1380,17 @@ function renderMusicPlayer(container) {
     }
   }
 
-  function playNext() { if (mediaFiles.length) safePlayMedia((currentIndex + 1) % mediaFiles.length); }
-  function playPrevious() { if (mediaFiles.length) safePlayMedia((currentIndex - 1 + mediaFiles.length) % mediaFiles.length); }
+  // Next and previous move one place through the queue and wrap around at either end.
+  function playNext() {
+    if (!queue.length) return;
+    let position = queuePos + 1;
+    if (position >= queue.length) { reshuffleForNextRound(); position = 0; }
+    playQueueAt(position);
+  }
+  function playPrevious() {
+    if (!queue.length) return;
+    playQueueAt(queuePos <= 0 ? queue.length - 1 : queuePos - 1);
+  }
 
   function updateProgress() {
     if (!currentMediaElement || !currentMediaElement.duration) return;
@@ -1359,17 +1425,21 @@ function renderMusicPlayer(container) {
       console.error('Error deleting media:', error);
     }
 
+    const wasCurrent = index === currentIndex;
+    const removedPosition = queue.indexOf(file);
     mediaFiles.splice(index, 1);
-    if (currentIndex >= index) currentIndex--;
-    if (currentIndex === -1 && mediaFiles.length > 0) currentIndex = 0;
+    if (removedPosition !== -1) queue.splice(removedPosition, 1);
+    if (index < currentIndex) currentIndex--; // library indexes after the removed one shift down
+    if (removedPosition !== -1 && removedPosition < queuePos) queuePos--;
 
-    if (currentIndex === -1 || mediaFiles.length === 0) {
+    if (mediaFiles.length === 0) {
       if (currentMediaElement) { currentMediaElement.pause(); currentMediaElement.remove(); currentMediaElement = null; }
       mediaPlayerMount.innerHTML = '';
       mediaPlayerMount.style.display = 'none';
       if (currentArtworkUrl) { URL.revokeObjectURL(currentArtworkUrl); currentArtworkUrl = null; }
       isPlaying = false;
       currentIndex = -1;
+      queuePos = -1;
       nowPlayingTitle.textContent = 'No media selected';
       nowPlayingArtist.textContent = 'Upload files to get started';
       nowPlayingArtwork.innerHTML = '<span class="material-symbols-outlined">music_note</span>';
@@ -1378,8 +1448,9 @@ function renderMusicPlayer(container) {
       currentTimeDisplay.textContent = '0:00';
       seekRange.value = 0;
       updateSeekFill();
-    } else {
-      safePlayMedia(currentIndex);
+    } else if (wasCurrent) {
+      // The playing track was removed: carry on with whatever comes next in the queue.
+      playQueueAt(queuePos < queue.length ? queuePos : 0);
     }
 
     updatePlayPauseButton();
@@ -1420,6 +1491,7 @@ function renderMusicPlayer(container) {
   shuffleBtn.addEventListener('click', () => {
     shuffleMode = !shuffleMode;
     shuffleBtn.classList.toggle('control-btn-active', shuffleMode);
+    buildQueue(); // shuffle on: reshuffle the rest after the current track; off: back to library order
   });
 
   repeatBtn.addEventListener('click', () => {
@@ -1457,10 +1529,11 @@ function renderMusicPlayer(container) {
         tags: null,
       });
     }
+    appendNewToQueue();
     updatePlaylist();
     if (mediaFiles.length > 0 && currentIndex === -1) {
       await waitForTabPaint();
-      safePlayMedia(0);
+      playQueueAt(0);
     }
   }
 
