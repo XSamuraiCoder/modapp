@@ -1,6 +1,6 @@
 {
   "name": "modapp",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "A lightweight modular desktop app",
   "homepage": "https://github.com/coolprojects123/modapp/",
   "author": {
@@ -83,7 +83,10 @@
       "icon": "electron/icon.png"
     },
     "mac": {
-      "target": "dmg",
+      "target": [ 
+        "dmg",
+        "pkg"
+      ],
       "icon": "electron/icon.png"
     },
     "nsis": {

@@ -88,6 +88,8 @@ jobs:
             dist-electron/*.rpm
             dist-electron/*.blockmap
             dist-electron/latest*.yml
+            dist-electron/*.dmg
+            dist-electron/*.pkg
           if-no-files-found: error
           retention-days: 14
 
