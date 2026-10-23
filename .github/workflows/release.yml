@@ -51,7 +51,7 @@ jobs:
         run: python -m pip install --upgrade castlabs-evs
 
       - name: Check EVS credentials
-        if: runner.os == 'Windows'
+        if: runner.os != 'Linux'
         shell: bash
         env:
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
