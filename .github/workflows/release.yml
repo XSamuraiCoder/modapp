@@ -72,16 +72,29 @@ jobs:
       - name: Test
         run: npm test
 
+      # Apple signing is optional. CSC_LINK must be left UNSET (not empty) when there is no
+      # certificate, otherwise electron-builder tries to read an empty path and fails.
+      - name: Configure macOS code signing
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$MAC_CSC_LINK" ]; then
+            echo "CSC_LINK=$MAC_CSC_LINK" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$MAC_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "No MAC_CSC_LINK secret set; building unsigned macOS app"
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          fi
+
       - name: Build Electron packages
         run: npm run ${{ matrix.build-script }}
         env:
           # Used by build/evs-sign.js (afterSign hook).
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
           EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
-          # Optional Apple signing. Empty on non-mac runners (CSC_LINK would otherwise be
-          # picked up for Windows signing) and when the secrets aren't set (unsigned build).
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
