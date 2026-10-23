@@ -18,6 +18,8 @@ jobs:
             build-script: build:linux
           - os: windows-2022
             build-script: build:windows
+          - os: macos-15
+            build-script: build:mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -76,6 +78,10 @@ jobs:
           # Used by build/evs-sign.js (afterSign hook).
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
           EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
+          # Optional Apple signing. Empty on non-mac runners (CSC_LINK would otherwise be
+          # picked up for Windows signing) and when the secrets aren't set (unsigned build).
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -90,6 +96,7 @@ jobs:
             dist-electron/latest*.yml
             dist-electron/*.dmg
             dist-electron/*.pkg
+            dist-electron/*.zip
           if-no-files-found: error
           retention-days: 14
 

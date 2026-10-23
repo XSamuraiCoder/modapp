@@ -18,7 +18,7 @@
     "build:linux": "electron-builder --linux --publish never",
     "build:windows": "electron-builder --win --publish never",
     "test": "node --test electron/*.test.js",
-    "build:mac": "electron-builder --mac --publish never",
+    "build:mac": "electron-builder --mac --universal --publish never",
     "sign": "node scripts/sign.js",
     "sign:windows": "node scripts/sign.js --platform=win32",
     "sign:mac": "node scripts/sign.js --platform=darwin",
@@ -60,6 +60,9 @@
       "package.json",
       "!**/*.map"
     ],
+    "asarUnpack": [
+      "**/node-pty/**"
+    ],
     "extraResources": [
       "mods/**"
     ],
@@ -83,10 +86,12 @@
       "icon": "electron/icon.png"
     },
     "mac": {
-      "target": [ 
+      "target": [
         "dmg",
+        "zip",
         "pkg"
       ],
+      "category": "public.app-category.utilities",
       "icon": "electron/icon.png"
     },
     "nsis": {
